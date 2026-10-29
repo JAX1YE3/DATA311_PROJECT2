@@ -1,0 +1,382 @@
+---
+title: "Data 311 Project 2 Data Cleaning"
+subtitle: "DATA 311 · Pattern for Project 2 Stage 1"
+format: html
+date: today
+execute:
+  echo: false
+  warning: false
+  message: false
+jupyter: python3
+---
+
+# Loading raw Data
+
+```{python}
+#| label: load-raw
+from pathlib import Path
+import pandas as pd
+
+from pathlib import Path
+import pandas as pd
+
+survey_path = Path("simulated_commuter_survey_2020_26_messy.csv")
+population_path = Path("population_addresses_messy.csv")
+
+survey = pd.read_csv(
+    survey_path,
+    dtype={"zip": "string"}
+)
+
+population = pd.read_csv(
+    population_path,
+    dtype={
+        "current_zip": "string",
+        "permanent_zip": "string"
+    }
+)
+
+print("COMMUTER SURVEY")
+print(f"Loaded raw file: {survey_path}")
+print(f"Rows: {len(survey)}")
+print(f"Columns: {len(survey.columns)}")
+display(survey.head())
+
+print("\nPOPULATION ADDRESSES")
+print(f"Loaded raw file: {population_path}")
+print(f"Rows: {len(population)}")
+print(f"Columns: {len(population.columns)}")
+display(population.head())
+```
+
+# Clean the Data and Display the Data
+
+```{python}
+#| label: Cleaning and logging the data
+
+from IPython.display import display
+
+survey_clean = survey.copy()
+survey_log_rows = []
+
+def log_survey(row_index, respondent_id, year, column, old_value,
+               new_value, action, note):
+    survey_log_rows.append({
+        "row_index": row_index,
+        "respondent_id": respondent_id,
+        "year": year,
+        "column": column,
+        "old_value": old_value,
+        "new_value": new_value,
+        "action": action,
+        "note": note
+    })
+
+print("Raw survey rows:", len(survey))
+print("Clean survey rows:", len(survey_clean))
+
+missing_id_rows = survey_clean[
+    survey_clean["respondent_id"].isna()
+    | survey_clean["year"].isna()
+]
+
+print("Rows with missing respondent_id or year:", len(missing_id_rows))
+display(missing_id_rows)
+
+## Check for duplicate respondent-year combinations
+
+duplicate_rows = survey_clean[
+    survey_clean.duplicated(
+        subset=["respondent_id", "year"],
+        keep=False
+    )
+]
+
+print("Rows involved in duplicate respondent-year combinations:",
+      len(duplicate_rows))
+display(duplicate_rows)
+```
+
+```{python}
+
+## Check commuting values and transportation percentages
+
+# Check days commuting
+days_numeric = pd.to_numeric(
+    survey_clean["days_commuting"],
+    errors="coerce"
+)
+
+invalid_days = survey_clean[
+    days_numeric.notna()
+    & ~days_numeric.between(1, 7)
+]
+
+print("Rows with numeric days_commuting outside 1-7:",
+      len(invalid_days))
+display(invalid_days.head(10))
+
+
+# Check nonnumeric values separately
+nonnumeric_days = survey_clean[
+    survey_clean["days_commuting"].notna()
+    & days_numeric.isna()
+]
+
+print("Rows with nonnumeric days_commuting values:",
+      len(nonnumeric_days))
+display(nonnumeric_days.head(10))
+
+
+# Check trips per week against the expected relationship
+trips_numeric = pd.to_numeric(
+    survey_clean["trips_per_week"],
+    errors="coerce"
+)
+
+trip_mismatch = survey_clean[
+    days_numeric.notna()
+    & trips_numeric.notna()
+    & (trips_numeric != 2 * days_numeric)
+]
+
+print("Rows where trips_per_week is not twice days_commuting:",
+      len(trip_mismatch))
+display(trip_mismatch.head(10))
+
+# Check transportation percentage columns
+
+pct_columns = [
+    column for column in survey_clean.columns
+    if column.startswith("pct_")
+]
+
+# Convert percentages to numbers for checking only
+pct_numeric = survey_clean[pct_columns].apply(
+    pd.to_numeric,
+    errors="coerce"
+)
+
+# Check percentages outside 0-100
+invalid_pct_rows = survey_clean[
+    ((pct_numeric < 0) | (pct_numeric > 100)).any(axis=1)
+]
+
+print("Rows with percentages outside 0-100:", len(invalid_pct_rows))
+display(invalid_pct_rows.head(10))
+
+
+# Check percentage totals
+pct_totals = pct_numeric.sum(axis=1, min_count=len(pct_columns))
+
+pct_mismatch = survey_clean[
+    pct_totals.notna() & ((pct_totals - 100).abs() > 0.1)
+]
+
+print("Rows where transportation percentages do not sum to 100:",
+      len(pct_mismatch))
+display(pct_mismatch.head(10))
+
+
+# Check for nonnumeric percentage values
+nonnumeric_pct_rows = survey_clean[
+    survey_clean[pct_columns].notna().ne(pct_numeric.notna()).any(axis=1)
+]
+
+print("Rows with nonnumeric percentage values:",
+      len(nonnumeric_pct_rows))
+display(nonnumeric_pct_rows.head(10))
+
+
+# Check for negative distances
+distance_numeric = pd.to_numeric(
+    survey_clean["distance_to_campus_miles"],
+    errors="coerce"
+)
+
+negative_distance = survey_clean[
+    distance_numeric.notna()
+    & (distance_numeric < 0)
+]
+
+print("Rows with negative distance:", len(negative_distance))
+display(negative_distance.head(10))
+
+# Check for nonnumeric distance values
+nonnumeric_distance = survey_clean[
+    survey_clean["distance_to_campus_miles"].notna()
+    & distance_numeric.isna()
+]
+
+print("Rows with nonnumeric distance values:",
+      len(nonnumeric_distance))
+display(nonnumeric_distance.head(10))
+
+
+# Check weeks per year
+weeks_numeric = pd.to_numeric(
+    survey_clean["weeks_per_year"],
+    errors="coerce"
+)
+
+invalid_weeks = survey_clean[
+    weeks_numeric.notna()
+    & ~weeks_numeric.between(0, 52)
+]
+
+print("Rows with weeks_per_year outside 0-52:",
+      len(invalid_weeks))
+display(invalid_weeks.head(10))
+
+# Check for nonnumeric weeks_per_year values
+nonnumeric_weeks = survey_clean[
+    survey_clean["weeks_per_year"].notna()
+    & weeks_numeric.isna()
+]
+
+print("Rows with nonnumeric weeks_per_year values:",
+      len(nonnumeric_weeks))
+display(nonnumeric_weeks.head(10))
+
+
+# Check year formatting
+valid_years = [
+    "2020-21", "2021-22", "2022-23",
+    "2023-24", "2024-25", "2025-26"
+]
+
+invalid_years = survey_clean[
+    ~survey_clean["year"].astype("string").isin(valid_years)
+]
+
+print("Rows with unexpected year values:", len(invalid_years))
+display(invalid_years[["respondent_id", "year"]].head(10))
+```
+
+
+```{python}
+
+# Step 1: Remove extra spaces from text values
+
+text_columns = survey_clean.select_dtypes(
+    include=["object", "string"]
+).columns
+
+for column in text_columns:
+    for row_index in survey_clean.index:
+        old_value = survey_clean.at[row_index, column]
+
+        if isinstance(old_value, str):
+            new_value = old_value.strip()
+
+            if old_value != new_value:
+                survey_clean.at[row_index, column] = new_value
+
+                log_survey(
+                    row_index,
+                    survey_clean.at[row_index, "respondent_id"],
+                    survey_clean.at[row_index, "year"],
+                    column,
+                    old_value,
+                    new_value,
+                    "changed",
+                    "Removed extra spaces around text"
+                )
+
+# Show the number of changes made
+survey_change_log = pd.DataFrame(survey_log_rows)
+
+print("Text formatting changes made:", len(survey_change_log))
+display(survey_change_log.head(20))
+```
+
+``` {python}
+
+# Step 2: Convert columns that should be numeric
+
+pct_columns = [
+    column for column in survey_clean.columns
+    if column.startswith("pct_")
+]
+
+numeric_columns = [
+    "days_commuting",
+    "trips_per_week",
+    "weeks_per_year",
+    "distance_to_campus_miles",
+    "mtcde_est"
+] + pct_columns
+
+numeric_changes = 0
+numeric_flags = 0
+
+for column in numeric_columns:
+    original_values = survey_clean[column].copy()
+
+    converted_values = pd.to_numeric(
+        original_values,
+        errors="coerce"
+    )
+
+    for row_index in survey_clean.index:
+        old_value = original_values.loc[row_index]
+        new_value = converted_values.loc[row_index]
+
+        # Flag nonblank values that could not be converted
+        if pd.notna(old_value) and str(old_value).strip() != "" and pd.isna(new_value):
+            log_survey(
+                row_index,
+                survey_clean.at[row_index, "respondent_id"],
+                survey_clean.at[row_index, "year"],
+                column,
+                old_value,
+                None,
+                "flagged",
+                "Could not convert value to a number"
+            )
+            numeric_flags += 1
+
+        # Record numeric values that were stored as text
+        elif isinstance(old_value, str) and pd.notna(new_value):
+            log_survey(
+                row_index,
+                survey_clean.at[row_index, "respondent_id"],
+                survey_clean.at[row_index, "year"],
+                column,
+                old_value,
+                new_value,
+                "changed",
+                "Converted text value to numeric"
+            )
+            numeric_changes += 1
+
+    survey_clean[column] = converted_values
+
+print("Text values converted to numbers:", numeric_changes)
+print("Nonblank values flagged as nonnumeric:", numeric_flags)
+
+# Update the change log to include both cleaning steps
+survey_change_log = pd.DataFrame(survey_log_rows)
+
+print("Total survey log entries:", len(survey_change_log))
+display(survey_change_log.head(20))
+
+# Inspect categorical values before standardizing them
+category_columns = [
+    "role",
+    "consent",
+    "year",
+    "residence_type",
+    "mode_primary"
+]
+
+for column in category_columns:
+    print("\nValues in", column, ":")
+    display(
+        survey_clean[column]
+        .value_counts(dropna=False)
+        .to_frame("rows")
+    )
+
+
+```
