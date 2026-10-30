@@ -1,6 +1,6 @@
 ---
-title: "Data 311 Project 2 Data Cleaning"
-subtitle: "DATA 311 · Pattern for Project 2 Stage 1"
+title: "DATA 311 Project 2 Stepping Stone 1: Cleaning the data"
+subtitle: "DATA 311: Synthetic Commuter Survey + Synthetic Campus Population cleaning"
 format: html
 date: today
 execute:
@@ -10,373 +10,291 @@ execute:
 jupyter: python3
 ---
 
-# Loading raw Data
+# Purpose
+
+This document cleans and documents the two core Stage 1 datasets following the VDS process: **understand the domain → examine the data → write action items → encode decisions in code**. Raw files are never overwritten. Code is hidden; the readable product is the narrative plus the change / issue log.
+
+# Step 1 — Domain / observational units
+
+- **Survey** (`simulated_commuter_survey_2020_26_messy.csv`): one row = **one respondent × one survey year**.
+- **Population** (`population_addresses_messy.csv`): one row = **one person** (campus role + current and permanent address).
+- **Third data source (not used yet):** routing/transit data from **HTA GTFS** and **Valhalla/OSM**. The team read `DATA311_Routing_Transit_Exploration_Colab.ipynb`; derived measures will be pulled in later stages.
+
+We followed the Synthetic Commuter Survey and Synthetic Campus Population data dictionaries from Canvas. **Ambiguities we noticed:**
+
+- `pct_*` columns should sum to 100, but the dictionary doesn't say what to do with rows that don't.
+- `respondent_id` repeats within a year with different answers, so it is not a unique key.
+- The population dictionary doesn't say how to treat out-of-state ZIPs or states (permanent addresses legitimately vary; current ones should be local).
+- `mode_primary` is "mode with largest Q7 %", but Walk is split across two columns; we combined them.
+- Hinarr Hu Moulik housing is only valid in 2025-26.
+
+# Step 2 — Load raw data
 
 ```{python}
 #| label: load-raw
 from pathlib import Path
+import re
 import pandas as pd
-
-from pathlib import Path
-import pandas as pd
-
-survey_path = Path("simulated_commuter_survey_2020_26_messy.csv")
-population_path = Path("population_addresses_messy.csv")
-
-survey = pd.read_csv(
-    survey_path,
-    dtype={"zip": "string"}
-)
-
-population = pd.read_csv(
-    population_path,
-    dtype={
-        "current_zip": "string",
-        "permanent_zip": "string"
-    }
-)
-
-print("COMMUTER SURVEY")
-print(f"Loaded raw file: {survey_path}")
-print(f"Rows: {len(survey)}")
-print(f"Columns: {len(survey.columns)}")
-display(survey.head())
-
-print("\nPOPULATION ADDRESSES")
-print(f"Loaded raw file: {population_path}")
-print(f"Rows: {len(population)}")
-print(f"Columns: {len(population.columns)}")
-display(population.head())
-```
-
-# Clean the Data and Display the Data
-
-```{python}
-#| label: Cleaning and logging the data
-
 from IPython.display import display
 
-survey_clean = survey.copy()
-survey_log_rows = []
+survey_path = Path("simulated_commuter_survey_2020_26_messy.csv")
+pop_path = Path("population_addresses_messy.csv")
 
-def log_survey(row_index, respondent_id, year, column, old_value,
-               new_value, action, note):
-    survey_log_rows.append({
-        "row_index": row_index,
-        "respondent_id": respondent_id,
-        "year": year,
-        "column": column,
-        "old_value": old_value,
-        "new_value": new_value,
-        "action": action,
-        "note": note
-    })
+# read everything as text so nothing (like ZIP leading zeros) gets silently changed
+survey_raw = pd.read_csv(survey_path, dtype=str, keep_default_na=False)
+pop_raw = pd.read_csv(pop_path, dtype=str, keep_default_na=False)
 
-print("Raw survey rows:", len(survey))
-print("Clean survey rows:", len(survey_clean))
-
-missing_id_rows = survey_clean[
-    survey_clean["respondent_id"].isna()
-    | survey_clean["year"].isna()
-]
-
-print("Rows with missing respondent_id or year:", len(missing_id_rows))
-display(missing_id_rows)
-
-## Check for duplicate respondent-year combinations
-
-duplicate_rows = survey_clean[
-    survey_clean.duplicated(
-        subset=["respondent_id", "year"],
-        keep=False
-    )
-]
-
-print("Rows involved in duplicate respondent-year combinations:",
-      len(duplicate_rows))
-display(duplicate_rows)
+print(f"Survey raw: {survey_path.resolve()}  ->  {len(survey_raw)} rows, {survey_raw.shape[1]} columns")
+print(f"Population raw: {pop_path.resolve()}  ->  {len(pop_raw)} rows, {pop_raw.shape[1]} columns")
+display(survey_raw.iloc[:5, :12])
+display(pop_raw.head())
 ```
+
+# Step 3 — Action items (written before "fixing")
+
+| ID | Dataset | Problem observed | VDS trait | Planned action |
+|----|---------|------------------|-----------|----------------|
+| A1 | both | Exact duplicate rows | duplicates | **Drop** exact copies |
+| A2 | both | Leading/trailing spaces, mixed case, typos in `role`, `city`, `year`, `state` | inconsistent values | **Standardize** to dictionary values |
+| A3 | both | Placeholders (`-`, `N/A`, `unknown`) | incomplete data | **Set blank** |
+| A4 | both | ZIPs like `95521.0`, `95521-0000` | improper format | **Standardize** to 5-digit text |
+| A5 | both | Truncated or transposed ZIPs (`9552`, `59521`) | invalid value | **Flag**; do not guess the true ZIP |
+| A6 | survey | Long-text answers in `resource_*` and `residence_type` | inconsistent values | **Map** to dictionary codes |
+| A7 | survey | `days_commuting` = `three`, 0, or 8 | improper type / invalid | Convert `three`; **flag** 0 and 8 |
+| A8 | survey | `pct_*` negative, above 100, or not summing to 100 | invalid value | **Flag**; do not invent values |
+| A9 | survey | Blank `trips_per_week` | incomplete data | **Fill** as 2 × `days_commuting` (dictionary rule) |
+| A10 | survey | `mode_primary` = `flying`, `teleport`, blank | invalid value | **Recompute** from `pct_*`; standardize valid labels |
+| A11 | survey | Hinarr Hu Moulik outside 2025-26 | invalid value | **Flag** |
+| A12 | both | Repeated `respondent_id`+year / `pop_id` with different data | nonstandard keys | **Flag**; keep rows |
+| A13 | population | `current_state` not CA | invalid value | **Flag** |
+
+# Step 4 — Clean + build a change / issue log
+
+What you should see below is the **log output**: row-level entries plus summary counts.
 
 ```{python}
+#| label: helpers
+log_frames = []
 
-## Check commuting values and transportation percentages
+def _log(ds, aid, df, mask, col, old, new, action, note, idcol):
+    if mask.any():
+        log_frames.append(pd.DataFrame({
+            "dataset": ds, "action_item": aid,
+            "row_index": df.index[mask], "id": df.loc[mask, idcol].values,
+            "column": col, "old_value": old[mask].values, "new_value": new[mask].values,
+            "action": action, "note": note,
+        }))
 
-# Check days commuting
-days_numeric = pd.to_numeric(
-    survey_clean["days_commuting"],
-    errors="coerce"
-)
+def change(ds, aid, df, col, new, action, note, idcol):
+    """Replace df[col] with `new` and log every row whose value actually changed."""
+    new = pd.Series(new, index=df.index)
+    old = df[col].copy()
+    _log(ds, aid, df, old.astype(str) != new.astype(str), col, old, new, action, note, idcol)
+    df[col] = new
 
-invalid_days = survey_clean[
-    days_numeric.notna()
-    & ~days_numeric.between(1, 7)
-]
+def flag(ds, aid, df, mask, col, note, idcol, flagcol):
+    """Add a boolean flag column and log flagged rows (value left unchanged)."""
+    mask = pd.Series(mask, index=df.index).fillna(False).astype(bool)
+    df[flagcol] = mask
+    _log(ds, aid, df, mask, col, df[col], df[col], "FLAG", note, idcol)
 
-print("Rows with numeric days_commuting outside 1-7:",
-      len(invalid_days))
-display(invalid_days.head(10))
+def drop_dups(ds, aid, df, idcol):
+    m = df.duplicated()
+    _log(ds, aid, df, m, idcol, df[idcol], df[idcol].map(lambda _: "(dropped)"), "DROP", "Exact duplicate of an earlier row", idcol)
+    return df[~m].copy()
 
+PLACEHOLDERS = {"", "-", "n/a", "na", "unknown"}
+CITY_FIX = {"mckinleyville": "McKinleyville", "mckinelyville": "McKinleyville", "arcatra": "Arcata",
+            "eurika": "Eureka", "eureaka": "Eureka", "bluelake": "Blue Lake",
+            "trinadad": "Trinidad", "fortunna": "Fortuna"}
+ROLE_FIX = {"student": "Student", "studnet": "Student", "faculty": "Faculty",
+            "staff/admin": "Staff/Admin", "staff-admin": "Staff/Admin", "staff": "Staff/Admin"}
 
-# Check nonnumeric values separately
-nonnumeric_days = survey_clean[
-    survey_clean["days_commuting"].notna()
-    & days_numeric.isna()
-]
+def fix_city(v):
+    t = v.lower()
+    return "" if t in PLACEHOLDERS else CITY_FIX.get(t, v.title())
 
-print("Rows with nonnumeric days_commuting values:",
-      len(nonnumeric_days))
-display(nonnumeric_days.head(10))
-
-
-# Check trips per week against the expected relationship
-trips_numeric = pd.to_numeric(
-    survey_clean["trips_per_week"],
-    errors="coerce"
-)
-
-trip_mismatch = survey_clean[
-    days_numeric.notna()
-    & trips_numeric.notna()
-    & (trips_numeric != 2 * days_numeric)
-]
-
-print("Rows where trips_per_week is not twice days_commuting:",
-      len(trip_mismatch))
-display(trip_mismatch.head(10))
-
-# Check transportation percentage columns
-
-pct_columns = [
-    column for column in survey_clean.columns
-    if column.startswith("pct_")
-]
-
-# Convert percentages to numbers for checking only
-pct_numeric = survey_clean[pct_columns].apply(
-    pd.to_numeric,
-    errors="coerce"
-)
-
-# Check percentages outside 0-100
-invalid_pct_rows = survey_clean[
-    ((pct_numeric < 0) | (pct_numeric > 100)).any(axis=1)
-]
-
-print("Rows with percentages outside 0-100:", len(invalid_pct_rows))
-display(invalid_pct_rows.head(10))
-
-
-# Check percentage totals
-pct_totals = pct_numeric.sum(axis=1, min_count=len(pct_columns))
-
-pct_mismatch = survey_clean[
-    pct_totals.notna() & ((pct_totals - 100).abs() > 0.1)
-]
-
-print("Rows where transportation percentages do not sum to 100:",
-      len(pct_mismatch))
-display(pct_mismatch.head(10))
-
-
-# Check for nonnumeric percentage values
-nonnumeric_pct_rows = survey_clean[
-    survey_clean[pct_columns].notna().ne(pct_numeric.notna()).any(axis=1)
-]
-
-print("Rows with nonnumeric percentage values:",
-      len(nonnumeric_pct_rows))
-display(nonnumeric_pct_rows.head(10))
-
-
-# Check for negative distances
-distance_numeric = pd.to_numeric(
-    survey_clean["distance_to_campus_miles"],
-    errors="coerce"
-)
-
-negative_distance = survey_clean[
-    distance_numeric.notna()
-    & (distance_numeric < 0)
-]
-
-print("Rows with negative distance:", len(negative_distance))
-display(negative_distance.head(10))
-
-# Check for nonnumeric distance values
-nonnumeric_distance = survey_clean[
-    survey_clean["distance_to_campus_miles"].notna()
-    & distance_numeric.isna()
-]
-
-print("Rows with nonnumeric distance values:",
-      len(nonnumeric_distance))
-display(nonnumeric_distance.head(10))
-
-
-# Check weeks per year
-weeks_numeric = pd.to_numeric(
-    survey_clean["weeks_per_year"],
-    errors="coerce"
-)
-
-invalid_weeks = survey_clean[
-    weeks_numeric.notna()
-    & ~weeks_numeric.between(0, 52)
-]
-
-print("Rows with weeks_per_year outside 0-52:",
-      len(invalid_weeks))
-display(invalid_weeks.head(10))
-
-# Check for nonnumeric weeks_per_year values
-nonnumeric_weeks = survey_clean[
-    survey_clean["weeks_per_year"].notna()
-    & weeks_numeric.isna()
-]
-
-print("Rows with nonnumeric weeks_per_year values:",
-      len(nonnumeric_weeks))
-display(nonnumeric_weeks.head(10))
-
-
-# Check year formatting
-valid_years = [
-    "2020-21", "2021-22", "2022-23",
-    "2023-24", "2024-25", "2025-26"
-]
-
-invalid_years = survey_clean[
-    ~survey_clean["year"].astype("string").isin(valid_years)
-]
-
-print("Rows with unexpected year values:", len(invalid_years))
-display(invalid_years[["respondent_id", "year"]].head(10))
+def fix_zip(v):
+    return re.sub(r"-0000$", "", re.sub(r"\.0$", "", v))
 ```
 
+## Survey
 
 ```{python}
+#| label: clean-survey
+DS = "survey"; ID = "respondent_id"
+s = survey_raw.apply(lambda c: c.str.strip())      # A2: trim whitespace (not logged per cell)
+n_survey_before = len(s)
 
-# Step 1: Remove extra spaces from text values
+s = drop_dups(DS, "A1", s, ID)
 
-text_columns = survey_clean.select_dtypes(
-    include=["object", "string"]
-).columns
+# A2: year, role, city
+def fix_year(y):
+    m = re.fullmatch(r"(?:20)?(\d\d)(?:-(?:20)?(\d\d))?", y.replace("/", "-"))
+    return f"20{int(m[1]):02d}-{(int(m[1]) + 1) % 100:02d}" if m else y
+change(DS, "A2", s, "year", s.year.map(fix_year), "STANDARDIZE", "Year format to YYYY-YY", ID)
+change(DS, "A2", s, "role", s.role.map(lambda v: ROLE_FIX.get(v.lower(), v)), "STANDARDIZE", "Role case/typo", ID)
+change(DS, "A2", s, "city", s.city.map(fix_city), "STANDARDIZE", "City case/typo", ID)
 
-for column in text_columns:
-    for row_index in survey_clean.index:
-        old_value = survey_clean.at[row_index, column]
+# A3: placeholders
+change(DS, "A3", s, "secondary_barrier",
+       s.secondary_barrier.where(~s.secondary_barrier.str.lower().isin(PLACEHOLDERS), ""),
+       "BLANK", "Placeholder to blank", ID)
 
-        if isinstance(old_value, str):
-            new_value = old_value.strip()
+# A4/A5: ZIP
+change(DS, "A4", s, "zip", s.zip.map(fix_zip), "STANDARDIZE", "Removed .0 / -0000", ID)
+flag(DS, "A5", s, ~s.zip.str.fullmatch(r"\d{5}"), "zip", "Truncated/invalid ZIP; true value unknown", ID, "flag_zip")
 
-            if old_value != new_value:
-                survey_clean.at[row_index, column] = new_value
+# A6: resource_* and residence_type
+def fix_resource(v):
+    t = v.lower()
+    if t in PLACEHOLDERS: return ""
+    if t.startswith(("knew_", "did_not_know_")): return t
+    if "did not know" in t or "didn't know" in t:
+        return "did_not_know_might_use" if ("will" in t or "'ll" in t) else "did_not_know_wouldnt_use"
+    if "knew about it" in t:
+        return "knew_and_used" if "and i used" in t else "knew_did_not_use"
+    return t
+for c in [c for c in s if c.startswith("resource_")]:
+    change(DS, "A6", s, c, s[c].map(fix_resource), "MAP", "Long text / placeholder to Q13 code", ID)
 
-                log_survey(
-                    row_index,
-                    survey_clean.at[row_index, "respondent_id"],
-                    survey_clean.at[row_index, "year"],
-                    column,
-                    old_value,
-                    new_value,
-                    "changed",
-                    "Removed extra spaces around text"
-                )
+def fix_res_type(v):
+    t = v.lower()
+    if "hinarr" in t or "off-campus university" in t: return "Off-campus University housing (Hinarr Hu Moulik)"
+    if t.startswith("on-campus") or t == "on campus": return "On-campus University housing"
+    if t.startswith("off-campus residence") or t == "off campus humboldt": return "Off-campus non-University within Humboldt County"
+    if t.startswith("housing insecure"): return "Housing insecure"
+    return v
+change(DS, "A6", s, "residence_type", s.residence_type.map(fix_res_type), "MAP", "Shortened to dictionary category", ID)
 
-# Show the number of changes made
-survey_change_log = pd.DataFrame(survey_log_rows)
+# A7: days_commuting
+change(DS, "A7", s, "days_commuting", s.days_commuting.replace({"three": "3"}), "PARSE", "Word to number", ID)
+s["days_commuting"] = pd.to_numeric(s.days_commuting, errors="coerce")
+flag(DS, "A7", s, ~s.days_commuting.between(1, 7), "days_commuting", "Outside 1-7; true value unknown", ID, "flag_days")
 
-print("Text formatting changes made:", len(survey_change_log))
-display(survey_change_log.head(20))
+# A8: pct_*
+pct = [c for c in s if c.startswith("pct_")]
+s[pct] = s[pct].apply(pd.to_numeric, errors="coerce")      # numeric type conversion only (not logged)
+s["pct_total"] = s[pct].sum(axis=1)
+bad_pct = (s[pct] < 0).any(axis=1) | (s[pct] > 100).any(axis=1) | (s.pct_total.round() != 100)
+flag(DS, "A8", s, bad_pct, "pct_total", "pct negative, >100, or total != 100", ID, "flag_pct")
+
+# A9: trips_per_week
+s["trips_per_week"] = pd.to_numeric(s.trips_per_week, errors="coerce")
+fill = s.trips_per_week.isna() & s.days_commuting.notna()
+_log(DS, "A9", s, fill, "trips_per_week", s.trips_per_week.astype(str), (2 * s.days_commuting).astype(str), "FILL", "2 x days_commuting", ID)
+s.loc[fill, "trips_per_week"] = 2 * s.days_commuting[fill]
+
+# A10: mode_primary
+std = s.mode_primary.str.lower().replace({"drive alone": "drive", "walking": "walk"})
+bad_mode = ~std.isin(["drive", "walk", "tele", "bus"])
+change(DS, "A10", s, "mode_primary", std.where(~bad_mode, s.mode_primary), "STANDARDIZE", "Case/label (drive alone, walking)", ID)
+agg = s[pct].copy(); agg["pct_walk"] = agg.pct_walk_oncampus + agg.pct_walk_offcampus
+agg = agg.drop(columns=["pct_walk_oncampus", "pct_walk_offcampus"])
+change(DS, "A10", s, "mode_primary", s.mode_primary.where(~bad_mode, agg.idxmax(axis=1).str.replace("pct_", "", regex=False)),
+       "RECODE", "Invalid label; recomputed as largest pct (walk = on+off campus)", ID)
+
+# A11, A12
+flag(DS, "A11", s, s.residence_type.str.contains("Hinarr") & (s.year != "2025-26"), "residence_type",
+     "Hinarr Hu Moulik only valid in 2025-26", ID, "flag_hhm_year")
+flag(DS, "A12", s, s.duplicated([ID, "year"], keep=False), ID,
+     "Same respondent_id + year (likely synthetic ID collision)", ID, "flag_dup_id_year")
 ```
 
-``` {python}
+## Population
 
-# Step 2: Convert columns that should be numeric
+```{python}
+#| label: clean-population
+DS = "population"; ID = "pop_id"
+p = pop_raw.apply(lambda c: c.str.strip())
+n_pop_before = len(p)
 
-pct_columns = [
-    column for column in survey_clean.columns
-    if column.startswith("pct_")
-]
+p = drop_dups(DS, "A1", p, ID)
 
-numeric_columns = [
-    "days_commuting",
-    "trips_per_week",
-    "weeks_per_year",
-    "distance_to_campus_miles",
-    "mtcde_est"
-] + pct_columns
+change(DS, "A2", p, "role", p.role.map(lambda v: ROLE_FIX.get(v.lower(), v)), "STANDARDIZE", "Role case/typo", ID)
+for c in ["current_city", "permanent_city"]:
+    change(DS, "A2", p, c, p[c].map(fix_city), "STANDARDIZE", "City case/typo/placeholder", ID)
+for c in ["current_state", "permanent_state"]:
+    change(DS, "A2", p, c, p[c].str.upper().str.rstrip(".").replace({"CALIFORNIA": "CA"}), "STANDARDIZE", "State to 2-letter code", ID)
 
-numeric_changes = 0
-numeric_flags = 0
+for c in ["current_zip", "permanent_zip"]:
+    z = p[c].map(fix_zip)
+    z = z.where(~z.str.lower().isin(PLACEHOLDERS), "")
+    change(DS, "A4", p, c, z, "STANDARDIZE", "Removed .0 / placeholder", ID)
 
-for column in numeric_columns:
-    original_values = survey_clean[column].copy()
-
-    converted_values = pd.to_numeric(
-        original_values,
-        errors="coerce"
-    )
-
-    for row_index in survey_clean.index:
-        old_value = original_values.loc[row_index]
-        new_value = converted_values.loc[row_index]
-
-        # Flag nonblank values that could not be converted
-        if pd.notna(old_value) and str(old_value).strip() != "" and pd.isna(new_value):
-            log_survey(
-                row_index,
-                survey_clean.at[row_index, "respondent_id"],
-                survey_clean.at[row_index, "year"],
-                column,
-                old_value,
-                None,
-                "flagged",
-                "Could not convert value to a number"
-            )
-            numeric_flags += 1
-
-        # Record numeric values that were stored as text
-        elif isinstance(old_value, str) and pd.notna(new_value):
-            log_survey(
-                row_index,
-                survey_clean.at[row_index, "respondent_id"],
-                survey_clean.at[row_index, "year"],
-                column,
-                old_value,
-                new_value,
-                "changed",
-                "Converted text value to numeric"
-            )
-            numeric_changes += 1
-
-    survey_clean[column] = converted_values
-
-print("Text values converted to numbers:", numeric_changes)
-print("Nonblank values flagged as nonnumeric:", numeric_flags)
-
-# Update the change log to include both cleaning steps
-survey_change_log = pd.DataFrame(survey_log_rows)
-
-print("Total survey log entries:", len(survey_change_log))
-display(survey_change_log.head(20))
-
-# Inspect categorical values before standardizing them
-category_columns = [
-    "role",
-    "consent",
-    "year",
-    "residence_type",
-    "mode_primary"
-]
-
-for column in category_columns:
-    print("\nValues in", column, ":")
-    display(
-        survey_clean[column]
-        .value_counts(dropna=False)
-        .to_frame("rows")
-    )
-
-
+flag(DS, "A5", p, ~p.current_zip.str.fullmatch(r"\d{5}") | p.current_zip.str.startswith("59"),
+     "current_zip", "Blank, truncated, or transposed ZIP", ID, "flag_zip")
+flag(DS, "A12", p, p.pop_id.duplicated(keep=False), ID, "Same pop_id, different data", ID, "flag_dup_id")
+flag(DS, "A13", p, p.current_state != "CA", "current_state", "Current address outside CA", ID, "flag_state_not_ca")
 ```
+
+## The change / issue log
+
+```{python}
+#| label: show-log
+change_log = pd.concat(log_frames, ignore_index=True)
+
+print("Row counts before / after cleaning:")
+display(pd.DataFrame({
+    "dataset": ["survey", "population"],
+    "rows_before": [n_survey_before, n_pop_before],
+    "rows_after": [len(s), len(p)],
+}).assign(rows_dropped=lambda d: d.rows_before - d.rows_after))
+
+print("\nSummary: logged issues/changes by dataset x variable x action")
+display(change_log.groupby(["dataset", "column", "action"]).size().rename("n").reset_index()
+        .sort_values(["dataset", "column", "action"]))
+
+print("\nSummary: by action item")
+display(change_log.groupby(["action_item", "dataset"]).size().rename("n_log_rows").reset_index()
+        .sort_values("action_item", key=lambda x: x.str[1:].astype(int)))
+
+print("\nTwo example rows per action item (the full row-level log is saved as change_log.csv):")
+display(change_log.groupby(["dataset", "action_item"], sort=False).head(2))
+```
+
+# Step 5 — Validation: Check Address
+
+A row's address counts as **valid format** if it has a street, a city, and a 5-digit ZIP; current addresses must also be in CA and not use a transposed `59xxx` ZIP. This is a format check only.
+
+```{python}
+#| label: validation
+def addr_ok(df, pre, local_only):
+    ok = df[f"{pre}_street"].ne("") & df[f"{pre}_city"].ne("") & df[f"{pre}_zip"].str.fullmatch(r"\d{5}")
+    if local_only:
+        ok &= df[f"{pre}_state"].eq("CA") & ~df[f"{pre}_zip"].str.startswith("59")
+    return ok
+
+val = pd.DataFrame({
+    "address": ["current", "permanent"],
+    "valid_format": [addr_ok(p, "current", True).sum(), addr_ok(p, "permanent", False).sum()],
+})
+val["not_valid"] = len(p) - val.valid_format
+val["total"] = len(p)
+display(val)
+
+print("\nBy role (current address):")
+display(pd.crosstab(p.role, addr_ok(p, "current", True).map({True: "valid_format", False: "not_valid"}).rename("current_address")))
+```
+
+# Step 6 — Save cleaned data beside the raw files
+
+```{python}
+#| label: write-clean
+s.to_csv("survey_clean.csv", index=False)
+p.to_csv("population_clean.csv", index=False)
+change_log.to_csv("change_log.csv", index=False)
+print("Wrote: survey_clean.csv, population_clean.csv, change_log.csv")
+```
+
+# assumptions
+
+- Numeric type conversions (`pct_*`, `trips_per_week`) and whitespace trimming are applied to every column but **not logged cell by cell**.
+- Invalid numbers (`pct_*`, `days_commuting`) are **flagged, not guessed**.
+- `mode_primary` is recomputed only for invalid labels; valid ones are only relabeled. Walk = on-campus + off-campus walking.
+- Blank `trips_per_week` is filled as 2 × `days_commuting`, per the dictionary, only when days is valid.
+
+#  unresolved issues
+
+- Truncated/transposed ZIPs are flagged but not repaired.
+- Rows with `pct_*` not summing to 100 are kept
