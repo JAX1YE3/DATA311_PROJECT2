@@ -279,9 +279,9 @@ display(pd.crosstab(p.role, addr_ok(p, "current", True).map({True: "valid_format
 
 # Step 5b — Nominatim address check (geocodability)
 
-We followed the course Nominatim notebook: structured queries, a 1.1 s rate limit, an identifying User-Agent, and a cache. Only addresses that passed the Step 5 format check are sent. The full run was done **once by the team** and is not re-run on render (`eval: false`). Each member also ran the small subset (`N_TEST = 15`) themselves.
+We followed the course Nominatim notebook: structured queries, a 1.1 s rate limit, an identifying User-Agent, and a cache. Only addresses that passed the Step 5 format check are sent. The full run was done **once by the team** and is not re-run on render (`eval: false`).
 
-**Status labels:** `ok` (house number, road, and city agree), `not_found`, and review statuses (`partial_match_review`, `mismatch_review`, `review`). Rows that failed the format check are `skipped_invalid_format`, and rows not yet sent are `not_checked`. A match is evidence of **geocodability**, not USPS deliverability or proof the person lives there. Raw address columns are never overwritten.
+**Status labels:** `ok` (house number, road, and city agree), `not_found`, and review statuses (`partial_match_review`, `mismatch_review`, `review`). Rows that failed the format check are `skipped_invalid_format`, and rows not yet sent are `not_checked`. A match is evidence of **geocodability**, not USPS deliverability or proof the person lives there. Raw address columns will not be overwritten.
 
 ```{python}
 #| label: nominatim-run
