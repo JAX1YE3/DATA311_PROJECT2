@@ -277,6 +277,127 @@ print("\nBy role (current address):")
 display(pd.crosstab(p.role, addr_ok(p, "current", True).map({True: "valid_format", False: "not_valid"}).rename("current_address")))
 ```
 
+# Step 5b — Nominatim address check (geocodability)
+
+We followed the course Nominatim notebook: structured queries, a 1.1 s rate limit, an identifying User-Agent, and a cache. Only addresses that passed the Step 5 format check are sent. The full run was done **once by the team** and is not re-run on render (`eval: false`). Each member also ran the small subset (`N_TEST = 15`) themselves.
+
+**Status labels:** `ok` (house number, road, and city agree), `not_found`, and review statuses (`partial_match_review`, `mismatch_review`, `review`). Rows that failed the format check are `skipped_invalid_format`, and rows not yet sent are `not_checked`. A match is evidence of **geocodability**, not USPS deliverability or proof the person lives there. Raw address columns are never overwritten.
+
+```{python}
+#| label: nominatim-run
+#| eval: true
+import os, json
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+
+CONTACT_EMAIL = os.environ.get("NOMINATIM_EMAIL", "rta21@humboldt.edu")   # <- put your own email here
+N_TEST = 30           # small test subset for each member; set to None for the one full team run
+
+geolocator = Nominatim(user_agent=f"data311_address_checking_class_demo ({CONTACT_EMAIL})", timeout=15)
+geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1.1, swallow_exceptions=True)
+
+# ---- helpers from the course Nominatim notebook ----
+def first_present(d, keys):
+    for k in keys:
+        if d.get(k): return str(d[k])
+    return None
+
+def normalize_text(x):
+    if x is None or pd.isna(x): return None
+    x = re.sub(r"[^a-z0-9 ]+", " ", str(x).lower().strip())
+    for old, new in {" street": " st", " avenue": " ave", " boulevard": " blvd", " road": " rd",
+                     " drive": " dr", " lane": " ln", " court": " ct"}.items():
+        x = x.replace(old, new)
+    return re.sub(r"\s+", " ", x).strip()
+
+def parse_input_street(street):
+    m = re.match(r"^([0-9]+[A-Za-z]?)\s+(.*)$", str(street).strip())
+    return (m.group(1), m.group(2)) if m else (None, str(street).strip())
+
+def agree_or_missing(returned, expected, normalizer=normalize_text):
+    if returned is None or pd.isna(returned) or str(returned).strip() == "": return None
+    return normalizer(returned) == normalizer(expected)
+
+def classify_match(row):
+    if not row["geocode_found"]: return "unmatched"
+    ih, ir = parse_input_street(row["street"])
+    house_ok = agree_or_missing(row["returned_house_number"], ih)
+    road_ok = agree_or_missing(row["returned_road"], ir)
+    city_ok = agree_or_missing(row["returned_city"], row["city"])
+    state_ok = agree_or_missing(row["returned_state"], row["state"], lambda x: str(x).upper().strip())
+    zip_ok = agree_or_missing(row["returned_zip"], str(row["zip"]), lambda x: str(x).strip())
+    if False in [road_ok, city_ok, state_ok, zip_ok] or house_ok is False: return "mismatch_review"
+    if ih is not None and house_ok is True and road_ok is True and city_ok is True: return "likely_match"
+    if road_ok is True and city_ok is True and (ih is None or house_ok is None): return "partial_match_review"
+    return "review"
+
+def geocode_one(row):
+    loc = geocode({"street": row["street"], "city": row["city"], "state": row["state"],
+                   "postalcode": row["zip"], "country": "USA"},
+                  exactly_one=True, addressdetails=True, country_codes="us")
+    if loc is None:
+        return {"geocode_found": False}
+    a = loc.raw.get("address", {})
+    iso = a.get("ISO3166-2-lvl4")
+    return {"geocode_found": True, "returned_address": loc.address,
+            "latitude": loc.latitude, "longitude": loc.longitude,
+            "importance": loc.raw.get("importance"),
+            "returned_house_number": a.get("house_number"),
+            "returned_road": first_present(a, ["road", "pedestrian", "footway", "path"]),
+            "returned_city": first_present(a, ["city", "town", "village", "municipality", "hamlet"]),
+            "returned_state": iso.split("-")[-1].upper() if iso and "-" in iso else None,
+            "returned_zip": a.get("postcode")}
+
+# ---- choose which addresses to send: only rows that passed the format check ----
+ok_rows = addr_ok(p, "current", True)
+cols = ["current_street", "current_city", "current_state", "current_zip"]
+uniq = p.loc[ok_rows, cols].drop_duplicates()
+if N_TEST: uniq = uniq.sample(n=min(N_TEST, len(uniq)), random_state=311)
+
+cache_file = Path("nominatim_cache.json")          # lets a run resume if it stops
+cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
+
+for i, (_, r) in enumerate(uniq.iterrows()):
+    key = "|".join(r[cols])
+    if key in cache: continue
+    row = {"street": r.current_street, "city": r.current_city, "state": r.current_state, "zip": r.current_zip}
+    geo = geocode_one(row)
+    raw_status = classify_match(pd.Series({**row, **geo}))
+    status = {"unmatched": "not_found", "likely_match": "ok"}.get(raw_status, raw_status)
+    cache[key] = {**geo, "status": status}
+    if i % 100 == 0: cache_file.write_text(json.dumps(cache))
+cache_file.write_text(json.dumps(cache))
+
+# ---- add the dictionary's new columns; raw address columns are kept ----
+g = p.copy()
+g["current_full_address"] = g.current_street + ", " + g.current_city + ", " + g.current_state + " " + g.current_zip
+hit = g[cols].agg("|".join, axis=1).map(cache)
+g["current_lat"] = hit.map(lambda h: h.get("latitude") if isinstance(h, dict) else None)
+g["current_lon"] = hit.map(lambda h: h.get("longitude") if isinstance(h, dict) else None)
+g["current_addr_norm"] = hit.map(lambda h: h.get("returned_address") if isinstance(h, dict) else None)
+g["current_importance"] = hit.map(lambda h: h.get("importance") if isinstance(h, dict) else None)
+g["current_geocode_status"] = hit.map(lambda h: h["status"] if isinstance(h, dict) else None)
+g["current_geocode_status"] = g.current_geocode_status.fillna("not_checked")
+g.loc[~ok_rows, "current_geocode_status"] = "skipped_invalid_format"
+g["geocoder"] = g.current_geocode_status.map(
+    lambda x: "" if x in ("not_checked", "skipped_invalid_format") else "nominatim")
+g.to_csv("population_geocoded.csv", index=False)
+print(f"Sent {len(uniq)} unique addresses; wrote population_geocoded.csv")
+```
+
+```{python}
+#| label: nominatim-results
+geo_path = Path("population_geocoded.csv")
+if geo_path.exists():
+    geo = pd.read_csv(geo_path, dtype=str, keep_default_na=False)
+    print("Validation: current addresses by geocode status")
+    display(geo.current_geocode_status.value_counts().rename_axis("current_geocode_status").reset_index(name="rows"))
+else:
+    print("population_geocoded.csv not found. The Nominatim run is not executed on render (eval: false).")
+```
+
+
+
 # Step 6 — Save cleaned data beside the raw files
 
 ```{python}
