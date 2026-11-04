@@ -1,7 +1,5 @@
 # Privacy & Security
 
-Owner: Katayoon (Track D). Written in parallel with the rest of Stage 3 so it shapes the map/dashboard design from the start, not bolted on at the end.
-
 ## 1. Sensitive fields in the raw data
 
 - **Exact street addresses** — `current_street`/`permanent_street` (and the derived `current_full_address`, `current_lat`/`current_lon` in `population_geocoded.csv`). These can pinpoint a specific residence.
