@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+  from pathlib import Path
 
 #page configuration
 st.set_page_config(layout = "wide", page_title="Cal Poly Humboldt Regional Commute App")
@@ -17,7 +18,8 @@ with map_container:
     st.header("Regional Map of Humboldt Area")
 
     #map_data from cleaned region routing table
-    map_data = pd.read_csv("region_routing_table.csv") 
+      DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "cleaned" / "region_routing_table.csv"
+  map_data = pd.read_csv(DATA_PATH) 
     map_df = pd.DataFrame(map_data)
     map_figure = px.scatter_map(map_df,  #these variable strings depend on map data variables in df
                                    lat= "lat",
