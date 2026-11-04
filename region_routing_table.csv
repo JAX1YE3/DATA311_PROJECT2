@@ -1,0 +1,7 @@
+region,lat,lon,walk_min,walk_mi,drive_min,drive_mi,nearest_stop_name,nearest_stop_dist_mi,bus_available,population_count,pct_bike,pct_bus,pct_drive,pct_shuttle,pct_tele,pct_walk,avg_co2e_bike,avg_co2e_bus,avg_co2e_drive,avg_co2e_shuttle,avg_co2e_tele,avg_co2e_walk
+Arcata,40.866517,-124.08284,16.56,0.773,2.91,0.7966,F St & 8th St (Arcata City Hall),0.13636724466905673,True,3943,0.0,1.16,43.31,0.04,12.14,43.35,,0.024,0.09,0.046,0.01,0.051
+Eureka,40.8018746,-124.1707558,166.25,8.6503,13.63,9.171,4th St & B St (Co-Op),0.0229754673288877,True,1713,0.15,0.68,57.12,0.0,10.67,31.38,1.991,0.0,0.882,,0.214,0.632
+McKinleyville,40.9675585,-124.1032897,134.57,6.9575,12.71,8.4506,Airport Rd & Halfway Ave - West Side,0.1711499754738082,True,1284,0.06,0.7,60.31,0.0,11.58,27.35,5.415,0.0,0.662,,0.163,0.364
+Fortuna,40.597407,-124.156034,503.96,25.8795,32.43,25.9404,N St & 11th St - SB Stop,0.10500848155248006,True,176,0.0,1.52,71.48,0.0,7.98,19.01,,9.99,2.948,,0.659,1.626
+Trinidad,41.059291,-124.143125,291.42,14.5605,18.53,15.1142,Main St & View Ave - Trinidad NB Stop,0.18751906661366113,True,182,0.0,2.07,56.99,0.0,11.4,29.53,,,1.772,,0.76,1.099
+Blue Lake,40.882907,-123.983949,190.8,9.8325,12.72,8.4115,Greenwood Ave (Blue Lake City Hall),0.404119473894209,True,229,0.66,1.32,58.28,0.0,10.6,29.14,0.006,,0.573,,0.098,0.48
