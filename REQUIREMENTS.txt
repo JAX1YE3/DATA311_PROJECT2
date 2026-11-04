@@ -1,3 +1,0 @@
-REQUIREMENTS
-
-	File to enter the project requirements. 
