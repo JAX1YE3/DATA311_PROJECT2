@@ -1,0 +1,14 @@
+# Used today by analysis/01_clean_data.qmd (Track A — data cleaning + Nominatim geocoding)
+pandas
+geopy
+jupyter
+ipython
+ 
+# Needed to render the .qmd / process_report.qmd to HTML
+# (Quarto itself is a separate CLI install, not a pip package: https://quarto.org)
+ 
+# Anticipated for Track C (dashboard/app.py) — add versions once that track starts
+# streamlit
+# streamlit-folium
+# folium
+# plotly
