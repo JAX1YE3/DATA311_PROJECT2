@@ -37,8 +37,8 @@ import re
 import pandas as pd
 from IPython.display import display
 
-survey_path = Path("simulated_commuter_survey_2020_26_messy.csv")
-pop_path = Path("population_addresses_messy.csv")
+survey_path = Path("../data/raw/simulated_commuter_survey_2020_26_messy.csv")
+pop_path = Path("../data/raw/population_addresses_messy.csv")
 
 # read everything as text so nothing (like ZIP leading zeros) gets silently changed
 survey_raw = pd.read_csv(survey_path, dtype=str, keep_default_na=False)
@@ -381,13 +381,13 @@ g["current_geocode_status"] = g.current_geocode_status.fillna("not_checked")
 g.loc[~ok_rows, "current_geocode_status"] = "skipped_invalid_format"
 g["geocoder"] = g.current_geocode_status.map(
     lambda x: "" if x in ("not_checked", "skipped_invalid_format") else "nominatim")
-g.to_csv("population_geocoded.csv", index=False)
-print(f"Sent {len(uniq)} unique addresses; wrote population_geocoded.csv")
+g.to_csv("../data/cleaned/population_geocoded.csv", index=False)
+print(f"Sent {len(uniq)} unique addresses; wrote ../data/cleaned/population_geocoded.csv")
 ```
 
 ```{python}
 #| label: nominatim-results
-geo_path = Path("population_geocoded.csv")
+geo_path = Path("../data/cleaned/population_geocoded.csv")
 if geo_path.exists():
     geo = pd.read_csv(geo_path, dtype=str, keep_default_na=False)
     print("Validation: current addresses by geocode status")
@@ -398,14 +398,14 @@ else:
 
 
 
-# Step 6 — Save cleaned data beside the raw files
+# Step 6 — Save cleaned data to data/cleaned/
 
 ```{python}
 #| label: write-clean
-s.to_csv("survey_clean.csv", index=False)
-p.to_csv("population_clean.csv", index=False)
-change_log.to_csv("change_log.csv", index=False)
-print("Wrote: survey_clean.csv, population_clean.csv, change_log.csv")
+s.to_csv("../data/cleaned/survey_clean.csv", index=False)
+p.to_csv("../data/cleaned/population_clean.csv", index=False)
+change_log.to_csv("../data/cleaned/change_log.csv", index=False)
+print("Wrote: data/cleaned/survey_clean.csv, population_clean.csv, change_log.csv")
 ```
 
 # assumptions
