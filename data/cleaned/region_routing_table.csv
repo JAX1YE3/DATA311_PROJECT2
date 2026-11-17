@@ -1,4 +1,4 @@
-region,lat,lon,walk_min,walk_mi,drive_min,drive_mi,nearest_stop_name,nearest_stop_dist_mi,bus_available,population_count,pct_bike,pct_bus,pct_drive,pct_shuttle,pct_tele,pct_walk,avg_co2e_bike,avg_co2e_bus,avg_co2e_drive,avg_co2e_shuttle,avg_co2e_tele,avg_co2e_walk,stop_to_campus_mi
+Region,Latitude,Longitude,Walk Time (min),Walk Distance (mi),Drive Time (min),Drive Distance (mi),Nearest Bus Stop,Distance to Nearest Stop (mi),Bus Available,Population,Bike (%),Bus (%),Drive (%),Shuttle (%),Remote (%),Walk (%),Avg Bike CO2e,Avg Bus CO2e,Avg Drive CO2e,Avg Shuttle CO2e,Avg Remote CO2e,Avg Walk CO2e,Bus Stop to Campus (mi)
 Arcata,40.866517,-124.08284,16.56,0.773,2.91,0.7966,F St & 8th St (Arcata City Hall),0.1363672446690567,True,3943,0.0,1.16,43.31,0.04,12.14,43.35,,0.024,0.09,0.046,0.01,0.051,0.641
 Eureka,40.8018746,-124.1707558,166.25,8.6503,13.63,9.171,4th St & B St (Co-Op),0.0229754673288877,True,1713,0.15,0.68,57.12,0.0,10.67,31.38,1.991,0.0,0.882,,0.214,0.632,6.992
 McKinleyville,40.9675585,-124.1032897,134.57,6.9575,12.71,8.4506,Airport Rd & Halfway Ave - West Side,0.1711499754738082,True,1284,0.06,0.7,60.31,0.0,11.58,27.35,5.415,0.0,0.662,,0.163,0.364,6.555
